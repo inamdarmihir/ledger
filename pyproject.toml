@@ -1,0 +1,93 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ledger-mcp"
+version = "0.1.0"
+description = "Consumer-side contract guard for MCP tool-schema drift — structural diffs + Qdrant semantic monitoring."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Ledger Contributors" }]
+keywords = ["mcp", "model-context-protocol", "schema-drift", "qdrant", "agents", "openai"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Quality Assurance",
+  "Typing :: Typed",
+]
+dependencies = [
+  "qdrant-client>=1.18.0",
+]
+
+[project.optional-dependencies]
+openai = [
+  "openai>=1.99.0",
+  "openai-agents>=0.19.1",
+]
+dev = [
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "ruff>=0.12",
+  "mypy>=1.16",
+  "openai>=1.99.0",
+  "openai-agents>=0.19.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/inamdarmihir/ledger"
+Documentation = "https://github.com/inamdarmihir/ledger#readme"
+Article = "https://github.com/inamdarmihir/ledger/blob/main/docs/article.md"
+
+[project.scripts]
+ledger-mcp = "ledger.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ledger"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/ledger" = "ledger"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/examples",
+  "/docs",
+  "/README.md",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests", "examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ledger"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["ledger"]
+mypy_path = "src"
+warn_unused_ignores = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["qdrant_client.*", "agents.*", "openai.*"]
+ignore_missing_imports = true
