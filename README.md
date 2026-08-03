@@ -1,6 +1,18 @@
+<div align="center">
+
 # Ledger
 
 **Consumer-side contract guard for MCP tool-schema drift.**
+
+[![License](https://img.shields.io/github/license/inamdarmihir/ledger?style=flat-square&color=5B5BD6)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.11%2B-3572A5?style=flat-square)
+[![Stars](https://img.shields.io/github/stars/inamdarmihir/ledger?style=flat-square&color=FB6A76)](https://github.com/inamdarmihir/ledger/stargazers)
+
+**[Design article](https://aihive.hashnode.dev/ledger-a-consumer-side-contract-guard-for-mcp-tool-schema-drift)** · **[License](#license)**
+
+</div>
+
+---
 
 Ledger watches Model Context Protocol servers you *consume but do not control*. It takes an independent daily `tools/list` snapshot (bypassing client-side cache TTLs), diffs each tool’s JSON Schema structurally, and checks description rewrites for semantic drift in Qdrant. Findings go to a human review queue — never an automated block.
 
@@ -180,3 +192,7 @@ Daily snapshot job ──force tools/list──▶ SnapshotStore (JSONL)
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
+
+---
+
+<div align="center"><sub>Part of the <a href="https://aihive.hashnode.dev">AIHive</a> series — <a href="https://aihive.hashnode.dev/ledger-a-consumer-side-contract-guard-for-mcp-tool-schema-drift">read the design article</a></sub></div>
