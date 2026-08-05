@@ -1,4 +1,15 @@
-"""Minimal CLI for running the contract guard against a JSONL snapshot log."""
+"""Minimal CLI for running the contract guard against a JSONL snapshot log.
+
+Commands:
+
+* ``ledger-mcp diff-pair before.json after.json`` — structural diff two schemas
+* ``ledger-mcp report-from-store tool_snapshots.jsonl [--semantic]`` — emit
+  routing + digest lines for the latest pair of every tool in a SnapshotStore
+
+The ``--semantic`` flag uses an offline hash embedder + Qdrant ``:memory:`` mode
+for demos only. Production semantic checks should use
+:func:`ledger.embeddings.make_openai_embed_fn` against a real Qdrant instance.
+"""
 
 from __future__ import annotations
 
@@ -28,6 +39,7 @@ def _hash_embed(text: str, dims: int = 32) -> list[float]:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the ``ledger-mcp`` argument parser."""
     parser = argparse.ArgumentParser(
         prog="ledger-mcp",
         description="Consumer-side MCP tool-schema drift guard",
@@ -35,8 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     diff_p = sub.add_parser("diff-pair", help="Structurally diff two schema JSON files")
-    diff_p.add_argument("before", type=Path)
-    diff_p.add_argument("after", type=Path)
+    diff_p.add_argument("before", type=Path, help="Yesterday's input_schema JSON")
+    diff_p.add_argument("after", type=Path, help="Today's input_schema JSON")
 
     run_p = sub.add_parser(
         "report-from-store",
@@ -128,6 +140,7 @@ def _cmd_report_from_store(store_path: Path, *, semantic: bool) -> int:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """CLI entry point used by the ``ledger-mcp`` console script."""
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "diff-pair":

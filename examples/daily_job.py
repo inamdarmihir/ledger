@@ -1,5 +1,25 @@
 #!/usr/bin/env python3
-"""Minimal daily contract-guard job wiring (article § Installing and Using Ledger)."""
+"""Minimal daily contract-guard job (article § Installing and Using Ledger).
+
+Wires:
+
+1. Your MCP clients (here: :class:`mock_mcp.MockMCPClient`)
+2. :class:`~ledger.snapshot.SnapshotStore` + :func:`~ledger.snapshot.snapshot_all_servers`
+3. :class:`~ledger.semantic.ToolDefinitionHistory` (Qdrant)
+4. :func:`~ledger.report.run_contract_guard` → :func:`~ledger.routing.route_report`
+
+Offline by default (hash embedder + Qdrant ``:memory:``). Set ``OPENAI_API_KEY``
+to use ``text-embedding-3-small`` instead.
+
+::
+
+    pip install -e .
+    python examples/daily_job.py
+
+    pip install -e ".[openai]"
+    export OPENAI_API_KEY=sk-...
+    python examples/daily_job.py
+"""
 
 from __future__ import annotations
 
@@ -23,15 +43,17 @@ from mock_mcp import MockMCPClient, search_customers_tool  # noqa: E402
 
 
 def page_oncall(message: str) -> None:
+    """Stand-in for your pager / high-urgency channel."""
     print(f"[PAGE]\n{message}\n")
 
 
 def append_to_digest(message: str) -> None:
+    """Stand-in for your daily review digest."""
     print(f"[DIGEST]\n{message}\n")
 
 
 def make_embed_fn():
-    """Prefer OpenAI text-embedding-3-small when OPENAI_API_KEY is set."""
+    """Prefer OpenAI ``text-embedding-3-small`` when ``OPENAI_API_KEY`` is set."""
     if os.getenv("OPENAI_API_KEY"):
         from openai import OpenAI
 
@@ -53,6 +75,7 @@ def make_embed_fn():
 
 
 def main() -> None:
+    """Seed yesterday, mutate the CRM tool, run today's guard, route reports."""
     embed_fn, vector_size = make_embed_fn()
     clients = {
         "crm": MockMCPClient(

@@ -1,4 +1,23 @@
-"""Deterministic structural JSON-Schema diff for MCP tool input schemas."""
+"""Deterministic structural JSON-Schema diff for MCP tool input schemas.
+
+Given two snapshots of the same tool, most interesting changes can be classified
+without embeddings: renames, type changes, enum narrowing, default changes, and
+required/optional flips.
+
+Severity taxonomy (design article — What "Breaking" Means for a Tool Schema):
+
+* ``hard_break`` — previously-valid calls will now fail outright
+  (required field removed/renamed, optional→required, type change).
+* ``soft_break`` — some previously-valid calls may fail or behave differently
+  (enum narrowed, default changed, bounds tightened, required→optional).
+* ``safe`` — additive; does not invalidate prior calls
+  (optional field added, enum widened).
+* ``none`` — no structural changes detected.
+
+This module handles flat, top-level parameters — the common case for MCP tools.
+Nested ``object`` / ``array`` schemas and ``oneOf`` / ``anyOf`` unions need the
+same walk applied recursively; the classification scheme stays the same.
+"""
 
 from __future__ import annotations
 
@@ -8,14 +27,26 @@ from typing import Any
 
 
 class ChangeSeverity(StrEnum):
-    HARD_BREAK = "hard_break"  # previously-valid calls will now fail outright
-    SOFT_BREAK = "soft_break"  # some previously-valid calls may now fail or behave differently
-    SAFE = "safe"  # additive, does not invalidate prior calls
+    """How dangerous a structural schema change is for existing callers."""
+
+    HARD_BREAK = "hard_break"
+    SOFT_BREAK = "soft_break"
+    SAFE = "safe"
     NONE = "none"
 
 
 @dataclass
 class StructuralChange:
+    """One classified difference between yesterday's and today's schema.
+
+    Attributes:
+        field_path: Dot-path to the changed field (e.g. ``limit.default``).
+        change_type: Machine-readable change kind (e.g. ``default_changed``).
+        severity: :class:`ChangeSeverity` for this individual change.
+        before: Prior value (or field name / ``None`` for additions).
+        after: New value (or field name / ``None`` for removals).
+    """
+
     field_path: str
     change_type: str
     severity: ChangeSeverity
@@ -24,7 +55,16 @@ class StructuralChange:
 
 
 def diff_schemas(before: dict[str, Any], after: dict[str, Any]) -> list[StructuralChange]:
-    """Classify top-level JSON Schema property changes into hard/soft/safe breaks."""
+    """Classify top-level JSON Schema property changes into hard/soft/safe breaks.
+
+    Args:
+        before: Yesterday's ``input_schema`` (JSON Schema object).
+        after: Today's ``input_schema``.
+
+    Returns:
+        List of :class:`StructuralChange` (empty if schemas are equivalent for
+        the properties this walker understands).
+    """
     changes: list[StructuralChange] = []
     before_props: dict[str, Any] = before.get("properties", {}) or {}
     after_props: dict[str, Any] = after.get("properties", {}) or {}
@@ -124,6 +164,15 @@ def diff_schemas(before: dict[str, Any], after: dict[str, Any]) -> list[Structur
 
 
 def worst_severity(changes: list[StructuralChange]) -> ChangeSeverity:
+    """Collapse a list of changes to the single worst severity.
+
+    Args:
+        changes: Structural changes from :func:`diff_schemas`.
+
+    Returns:
+        ``HARD_BREAK`` if any hard break exists, else ``SOFT_BREAK``, else
+        ``SAFE`` if anything changed, else ``NONE``.
+    """
     if any(c.severity == ChangeSeverity.HARD_BREAK for c in changes):
         return ChangeSeverity.HARD_BREAK
     if any(c.severity == ChangeSeverity.SOFT_BREAK for c in changes):

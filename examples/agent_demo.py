@@ -1,12 +1,34 @@
 #!/usr/bin/env python3
-"""End-to-end demo: OpenAI Agents SDK agent + Ledger contract guard.
+"""End-to-end demo: Ledger contract guard + OpenAI Agents SDK triage agent.
 
-Verified model (OpenAI Agents SDK docs, 2026):
-  - Agent model: ``gpt-5.6-sol`` (recommended high-quality Responses-path model)
-  - Embeddings: ``text-embedding-3-small`` @ 1536 dims (matches Qdrant collection)
+This script follows the official Agents SDK documentation patterns:
 
-Requires ``OPENAI_API_KEY``. Without it, the script still runs the Ledger pipeline
-offline and prints the agent wiring that would be used.
+* **Models guide** — set ``model="gpt-5.6-sol"`` (recommended high-quality
+  Responses-path model) and pass explicit ``ModelSettings`` with
+  ``reasoning`` / ``verbosity`` rather than relying on implicit defaults.
+* **Runner** — ``await Runner.run(agent, input)`` for the triage turn.
+* **Function tools** — optional ``@function_tool`` from
+  :func:`ledger.agents_adapter.make_digest_triage_tool`.
+* **MCP caching** — live Agents SDK traffic may use ``cache_tools_list=True``;
+  Ledger's snapshot path always calls ``list_tools(force_refresh=True)``
+  (or ``invalidate_tools_cache()`` via :func:`ledger.agents_adapter.wrap_agents_mcp_server`).
+
+Verified stack
+--------------
+* Agentic framework: ``openai-agents`` ≥ 0.19.1
+* Agent model: ``gpt-5.6-sol``
+* Embeddings: ``text-embedding-3-small`` @ 1536 dims
+
+Setup
+-----
+::
+
+    pip install -e ".[openai]"
+    export OPENAI_API_KEY=sk-...
+    python examples/agent_demo.py
+
+Without ``OPENAI_API_KEY``, the Ledger pipeline still runs offline (hash
+embedder) and the script prints the agent wiring that would be used.
 """
 
 from __future__ import annotations
@@ -23,6 +45,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "examples"))
 
+from ledger.agents_adapter import (  # noqa: E402
+    DEFAULT_AGENT_MODEL,
+    build_triage_agent,
+    make_digest_triage_tool,
+)
 from ledger.diff import ChangeSeverity  # noqa: E402
 from ledger.report import run_contract_guard  # noqa: E402
 from ledger.routing import format_for_digest, route_report  # noqa: E402
@@ -31,11 +58,12 @@ from ledger.snapshot import SnapshotStore, snapshot_all_servers  # noqa: E402
 from mock_mcp import MockMCPClient, search_customers_tool  # noqa: E402
 
 # Latest high-quality model recommended by OpenAI Agents SDK (Python) docs.
-AGENT_MODEL = "gpt-5.6-sol"
+AGENT_MODEL = DEFAULT_AGENT_MODEL
 EMBEDDING_MODEL = "text-embedding-3-small"
 
 
 def hash_embed(text: str, dims: int = 64) -> list[float]:
+    """Deterministic offline embedder so description rewrites move the vector."""
     vec = [0.0] * dims
     for i, ch in enumerate(text.lower()):
         vec[(ord(ch) + i) % dims] += 1.0
@@ -46,7 +74,7 @@ def hash_embed(text: str, dims: int = 64) -> list[float]:
 
 
 def run_ledger_pipeline() -> str:
-    """Detect the article's search_customers drift and return a digest string."""
+    """Detect the article's ``search_customers`` drift and return a digest string."""
     yesterday = "Search customer records by name or account ID."
     today = (
         "Search customer records by name or account ID. Use sparingly — "
@@ -92,40 +120,42 @@ def run_ledger_pipeline() -> str:
 
 
 async def run_agent_review(digest: str) -> None:
-    """Ask an Agents SDK agent to triage the Ledger digest."""
-    from agents import Agent, ModelSettings, Runner
-    from openai.types.shared import Reasoning
+    """Ask an Agents SDK agent to triage the Ledger digest.
 
-    agent = Agent(
-        name="MCP Contract Reviewer",
-        instructions=(
-            "You review Ledger MCP drift digests. Summarize structural vs semantic "
-            "signals, say whether on-call should page, and recommend one next action. "
-            "Be concise (under 120 words)."
-        ),
-        model=AGENT_MODEL,
-        model_settings=ModelSettings(
-            reasoning=Reasoning(effort="low"),
-            verbosity="low",
-        ),
-    )
+    Uses :func:`ledger.agents_adapter.build_triage_agent` (``gpt-5.6-sol`` +
+    explicit ``ModelSettings``) and attaches a function tool for digest formatting,
+    matching the Tools + Models guides.
+    """
+    from agents import Runner
+
+    agent = build_triage_agent(model=AGENT_MODEL)
+    # Attach a function tool so the agent can re-format digests (Agents SDK Tools guide).
+    agent.tools = [make_digest_triage_tool()]
+
     result = await Runner.run(
         agent,
-        f"Triage this Ledger digest for a customer-facing CRM MCP server:\n\n{digest}",
+        (
+            "Triage this Ledger digest for a customer-facing CRM MCP server.\n"
+            "Decide page vs digest vs ignore, and give one next action.\n\n"
+            f"{digest}"
+        ),
     )
-    print("\n=== Agent triage (gpt-5.6-sol) ===")
+    print(f"\n=== Agent triage ({AGENT_MODEL}) ===")
     print(result.final_output)
 
 
 def main() -> None:
+    """Run Ledger offline, then optionally call the Agents SDK triage agent."""
     print("=== Ledger + OpenAI Agents SDK end-to-end demo ===")
     print(f"Configured agent model: {AGENT_MODEL}")
+    print("Agents SDK pattern: Agent(model=..., model_settings=ModelSettings(...)) + Runner.run")
     digest = run_ledger_pipeline()
 
     if not os.getenv("OPENAI_API_KEY"):
         print(
             f"\nSkipping live agent call (set OPENAI_API_KEY to run Agents SDK with {AGENT_MODEL})."
         )
+        print("See docs/SETUP.md for install + environment steps.")
         return
 
     asyncio.run(run_agent_review(digest))

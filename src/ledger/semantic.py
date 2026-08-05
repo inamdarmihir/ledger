@@ -1,4 +1,21 @@
-"""Qdrant-backed semantic drift detection over tool definition embeddings."""
+"""Qdrant-backed semantic drift detection over tool definition embeddings.
+
+The structural differ has nothing to say about a description rewrite that leaves
+the schema shape untouched. That is the gap this module fills: each tool's full
+definition text — name, description, and parameter documentation — gets embedded
+and stored, and every new snapshot is compared against that tool's *own*
+prior-snapshot embedding history (filtered to the exact ``server_name`` +
+``tool_name`` pair).
+
+A large semantic distance from a tool's own established trajectory, even with an
+identical JSON Schema, is the signal that a rewording may be shifting what the
+model infers about correct usage.
+
+Uses Qdrant's current Query API (``query_points`` + ``PointStruct``). Default
+vector size is **1536**, matching OpenAI ``text-embedding-3-small``.
+
+Design article: Component Three — Qdrant as the Semantic-Drift Side-Piece.
+"""
 
 from __future__ import annotations
 
@@ -22,19 +39,22 @@ from ledger.snapshot import ToolSnapshot
 
 EmbedFn = Callable[[str], list[float]]
 
-# text-embedding-3-small default output size (OpenAI, verified 2026).
+# text-embedding-3-small default output size (OpenAI, verified against docs).
 DEFAULT_VECTOR_SIZE = 1536
 
 
 def _is_local_qdrant(client: QdrantClient) -> bool:
+    """Return True when the client is in-process local / ``:memory:`` mode."""
     inner = getattr(client, "_client", None)
     return inner is not None and "qdrant_local" in type(inner).__module__
 
 
 class ToolDefinitionHistory:
-    """Embeddings of each tool's definition text over time (not the raw snapshots).
+    """Embeddings of each tool's definition text over time.
 
-    Answers: does today's definition read like a continuation of this tool's
+    Qdrant holds vectors — not the raw snapshots themselves (those live in
+    :class:`~ledger.snapshot.SnapshotStore`). This collection answers one
+    question: does today's definition read like a continuation of this tool's
     own history, or a departure from it?
     """
 
@@ -45,6 +65,17 @@ class ToolDefinitionHistory:
         collection: str = "tool_definition_history",
         vector_size: int = DEFAULT_VECTOR_SIZE,
     ) -> None:
+        """Ensure the collection exists and store the embedding callable.
+
+        Args:
+            client: Qdrant client (server URL or ``location=":memory:"`` for
+                offline demos / tests).
+            embed_fn: ``Callable[[str], list[float]]`` — typically
+                :func:`ledger.embeddings.make_openai_embed_fn` in production.
+            collection: Qdrant collection name.
+            vector_size: Expected embedding dimensionality (must match
+                ``embed_fn`` output; default 1536 for ``text-embedding-3-small``).
+        """
         self.client = client
         self.embed_fn = embed_fn
         self.collection = collection
@@ -71,6 +102,14 @@ class ToolDefinitionHistory:
                         )
 
     def record(self, snapshot: ToolSnapshot) -> None:
+        """Upsert today's definition embedding into the per-tool history.
+
+        Args:
+            snapshot: Snapshot whose ``raw_definition`` will be embedded.
+
+        Raises:
+            ValueError: If ``embed_fn`` returns the wrong dimensionality.
+        """
         vector = self.embed_fn(snapshot.raw_definition)
         if len(vector) != self.vector_size:
             raise ValueError(
@@ -98,7 +137,21 @@ class ToolDefinitionHistory:
         top_k: int = 14,
         similarity_floor: float = 0.90,
     ) -> dict[str, Any]:
-        """Compare today's definition against this tool's own historical embeddings."""
+        """Compare today's definition against this tool's own historical embeddings.
+
+        The filter pins both ``server_name`` and ``tool_name`` — drifting relative
+        to a *different* tool's history would be meaningless.
+
+        Args:
+            snapshot: Today's snapshot to evaluate.
+            top_k: How many prior embeddings to average over.
+            similarity_floor: Mean cosine similarity below which we flag drift.
+                ``0.90`` is an illustrative starting point (see article Challenges).
+
+        Returns:
+            Dict with ``drifted``, ``reason``, ``mean_similarity``, and when
+            history exists, the most similar prior date/text for human review.
+        """
         hits = self.client.query_points(
             collection_name=self.collection,
             query=self.embed_fn(snapshot.raw_definition),
