@@ -1,232 +1,114 @@
 <div align="center">
 
-# Ledger
+# ledger
 
-**Consumer-side contract guard for MCP tool-schema drift.**
+**MCP tool schema drift detector — know when an upstream server silently changes its contract.**
 
-[![License](https://img.shields.io/github/license/inamdarmihir/ledger?style=flat-square&color=5B5BD6)](LICENSE)
-![Python](https://img.shields.io/badge/python-3.11%2B-3572A5?style=flat-square)
-[![Stars](https://img.shields.io/github/stars/inamdarmihir/ledger?style=flat-square&color=FB6A76)](https://github.com/inamdarmihir/ledger/stargazers)
-
-**[Design article](https://aihive.hashnode.dev/ledger-a-consumer-side-contract-guard-for-mcp-tool-schema-drift)** · **[License](#license)**
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Qdrant](https://img.shields.io/badge/vector--db-Qdrant-red.svg)](https://qdrant.tech)
+[![Agno](https://img.shields.io/badge/agent-agno%20v2.8.6-blueviolet.svg)](https://github.com/agno-agi/agno)
+[![mem0](https://img.shields.io/badge/memory-mem0%20v3.0.0-green.svg)](https://mem0.ai)
+[![LangGraph](https://img.shields.io/badge/orchestration-LangGraph%20v1.2.10-orange.svg)](https://langchain-ai.github.io/langgraph/)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-informational.svg)](https://inamdarmihir.github.io/ledger/)
 
 </div>
 
 ---
 
-Ledger watches Model Context Protocol servers you *consume but do not control*. It takes an independent daily `tools/list` snapshot (bypassing client-side cache TTLs), diffs each tool’s JSON Schema structurally, and checks description rewrites for semantic drift in Qdrant. Findings go to a human review queue — never an automated block.
+## The Problem
 
-This repository is an end-to-end implementation of the design in [`docs/article.md`](docs/article.md).
+MCP servers change tool schemas without versioning — required parameters become optional, enums gain new values, descriptions shift meaning. Consumer agents break silently at next restart.
 
-**New here?** Follow the step-by-step guide: [`docs/SETUP.md`](docs/SETUP.md) (install, `.env`, Agents SDK wiring, CLI).
+## The Solution
 
----
+**ledger** takes independent daily snapshots of MCP server tool lists, diffs JSON schemas structurally, checks description rewrites for semantic drift via Qdrant embeddings, and routes findings to the right review queue.
 
-## Why it exists
+## Change Severity
 
-MCP’s 2026-07-28 revision added caching hints (`ttlMs`, `cacheScope`) on `tools/list`. That is a real efficiency win for stable tool surfaces — and it widens the window during which a client can keep reasoning against a schema the server has already moved past.
+| Severity | Example | Action |
+|---|---|---|
+| `hard_break` | Required param removed | Page immediately |
+| `soft_break` | Param type widened | Daily digest |
+| `safe` | Description typo fixed | Log only |
+| `none` | No change | Skip |
 
-Ledger closes that blind spot from the consumer side:
-
-| Layer | Catches | Mechanism |
-| --- | --- | --- |
-| **Structural diff** | Renames, type changes, enum narrowing, default changes, required/optional flips | Deterministic JSON Schema walk |
-| **Semantic drift** | Description rewrites that leave the schema shape untouched | Per-tool embedding history in Qdrant |
-
-## Package layout
+## How It Works
 
 ```
-ledger/
-├── snapshot.py        # ToolSnapshot, SnapshotStore, snapshot_all_servers()
-├── diff.py            # diff_schemas(), StructuralChange, worst_severity()
-├── semantic.py        # ToolDefinitionHistory (Qdrant-backed drift check)
-├── report.py          # DriftReport, run_contract_guard()
-├── routing.py         # route_report(), format_for_digest()
-├── priority.py        # recommend_cadence()
-├── embeddings.py      # OpenAI text-embedding-3-small helper
-├── protocols.py       # MCPClientLike protocol (Ledger wraps your client)
-├── agents_adapter.py  # OpenAI Agents SDK MCP wrap + gpt-5.6-sol triage Agent
-└── cli.py             # ledger-mcp console entrypoint
+Daily cron / CI
+  │
+  ▼
+snapshot.py — tools/list from each MCP server → JSONL store
+  │
+  ▼
+diff.py — JSON Schema structural comparison
+  │
+  ▼
+semantic.py — description embedding vs Qdrant history (cosine drop)
+  │
+  ▼
+report.py — DriftReport aggregation
+  │
+  ▼
+routing.py — page_immediately | daily_digest | log_only
+  └─ mem0 — cross-run drift pattern memory
+  └─ agno triage agent — GPT summary for digest queue
 ```
 
-Every module carries article-aligned docstrings so the public API is readable
-without leaving your editor. Examples live under [`examples/`](examples/README.md).
-
-## Verified models & stack
-
-| Concern | Choice | Verified |
-| --- | --- | --- |
-| Agentic framework | [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/) (`openai-agents` ≥ 0.19.1) | Docs recommend **`gpt-5.6-sol`** for higher-quality agent work on the Responses path |
-| Embeddings | OpenAI **`text-embedding-3-small`** | Default **1536** dimensions — matches Ledger’s Qdrant collection |
-| Vector store | [Qdrant](https://qdrant.tech/documentation/) via `qdrant-client` ≥ 1.18.0 | Uses `query_points` + `PointStruct` (current Query API) |
-| Python | 3.11+ | Typed package (`py.typed`) |
-
-Set `OPENAI_API_KEY` to exercise live embeddings / the Agents SDK demo. All unit tests and the worked example run offline with a deterministic hash embedder and Qdrant `:memory:` mode.
-
-## Install
+## Quick Start
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-
-# Library only (structural + Qdrant semantic layers)
-pip install -e .
-
-# With OpenAI Agents SDK + embeddings (recommended for agent demos)
-pip install -e ".[openai]"
-
-# Dev: tests, ruff, mypy
-pip install -e ".[dev]"
-
-# Optional secrets for live demos
-cp .env.example .env   # then set OPENAI_API_KEY
+pip install ledger-mcp
+docker run -p 6333:6333 qdrant/qdrant
 ```
-
-Full walkthrough (Agents SDK MCP caching, triage agent, Qdrant): [`docs/SETUP.md`](docs/SETUP.md).
-
-## Quick start
 
 ```python
-from datetime import date
-from qdrant_client import QdrantClient
-from openai import OpenAI
+from ledger.snapshot import SnapshotStore
+from ledger.report import run_contract_guard
+from ledger.memory import build_memory
 
-from ledger import (
-    SnapshotStore,
-    ToolDefinitionHistory,
-    snapshot_all_servers,
-    run_contract_guard,
-    route_report,
-    format_for_digest,
-)
-from ledger.embeddings import make_openai_embed_fn
+store = SnapshotStore(path=".ledger/snapshots.jsonl")
+store.save_snapshot(server_url="https://my-mcp.example.com", tools=tools_list)
 
-store = SnapshotStore(path="tool_snapshots.jsonl")
-history = ToolDefinitionHistory(
-    QdrantClient(url="http://localhost:6333"),
-    embed_fn=make_openai_embed_fn(OpenAI()),  # text-embedding-3-small @ 1536-d
-)
-
-# your_mcp_clients: dict[str, MCPClientLike] with list_tools(force_refresh=True)
-snapshots = snapshot_all_servers(your_mcp_clients, store, snapshot_date=date.today().isoformat())
-reports = run_contract_guard(store, history, snapshots)
-
-for report in reports:
-    route = route_report(report)
-    if route == "page_immediately":
-        page_oncall(format_for_digest(report))
-    elif route == "daily_digest":
-        append_to_digest(format_for_digest(report))
+memory = build_memory()
+report = run_contract_guard(store, server_url="https://my-mcp.example.com")
+print(report.worst_severity)   # hard_break / soft_break / safe / none
 ```
 
-Ledger does **not** ship an MCP client. It wraps whatever client your agent framework already maintains and always calls `list_tools(force_refresh=True)` so monitoring is independent of `ttlMs`.
+```bash
+ledger-mcp diff-pair --before snap1.json --after snap2.json
+ledger-mcp report-from-store --store .ledger/snapshots.jsonl
+```
 
-### OpenAI Agents SDK
+## LangGraph Drift Pipeline
 
 ```python
-from agents.mcp import MCPServerStreamableHttp
-from agents import Runner
-from ledger.agents_adapter import wrap_agents_mcp_server, build_triage_agent
+from ledger.agno_agent import build_langgraph_drift_pipeline, build_agno_triage_agent
 
-# Live agent traffic may cache tools/list; Ledger busts that cache on its cadence.
-async with MCPServerStreamableHttp(
-    name="crm", params={"url": "http://localhost:8000/mcp"}, cache_tools_list=True
-) as server:
-    clients = {"crm": wrap_agents_mcp_server(server)}
-    snapshots = snapshot_all_servers(clients, store, snapshot_date=today)
-
-agent = build_triage_agent()  # model="gpt-5.6-sol" + explicit ModelSettings
-result = await Runner.run(agent, f"Triage this Ledger digest:\n\n{digest}")
+pipeline = build_langgraph_drift_pipeline(store, router, memory=memory)
+result = pipeline.invoke({"server_url": "https://my-mcp.example.com", "tool_name": "search"})
+print(result["route"])  # page_immediately / daily_digest / log_only
 ```
 
-### CLI
+## Configuration
 
-```bash
-# Structural diff two schema JSON files
-ledger-mcp diff-pair before.json after.json
+| Variable | Default | Description |
+|---|---|---|
+| `QDRANT_URL` | `http://localhost:6333` | Qdrant instance URL |
+| `OPENAI_API_KEY` | — | Required for semantic diff + triage agent |
+| `LEDGER_SEMANTIC_THRESHOLD` | `0.9` | Cosine drop below which description drift fires |
+| `LEDGER_SNAPSHOT_PATH` | `.ledger/snapshots.jsonl` | JSONL snapshot store path |
 
-# Emit routing + digest lines from an existing SnapshotStore JSONL
-ledger-mcp report-from-store tool_snapshots.jsonl --semantic
-```
+## Tech Stack
 
-## End-to-end examples
-
-```bash
-# Article worked example (offline, no API key)
-python examples/worked_example.py
-
-# Daily job wiring (offline hash embedder, or OpenAI if keyed)
-python examples/daily_job.py
-
-# Agents SDK triage with gpt-5.6-sol (needs OPENAI_API_KEY for live agent call)
-python examples/agent_demo.py
-```
-
-### Worked example (summary)
-
-`search_customers(query, limit=20)` quietly becomes `limit=5` and the description warns about rate limits. Ledger reports:
-
-- **Structural:** `default_changed` on `limit.default` → `soft_break`
-- **Semantic:** mean similarity to the tool’s own history drops below the floor
-- **Route:** `daily_digest` (hard breaks page immediately)
-
-## Severity taxonomy
-
-| Change | Severity |
-| --- | --- |
-| Required field removed / renamed away | `hard_break` |
-| Optional → required, type change | `hard_break` |
-| Enum narrowed, default changed, bounds tightened | `soft_break` |
-| Optional field added, enum widened | `safe` |
-| Description-only rewrite | structural `none` + possible semantic flag |
-
-## Development
-
-```bash
-pip install -e ".[dev]"
-
-# Lint
-ruff check src tests examples
-ruff format --check src tests examples
-
-# Types
-mypy
-
-# Tests
-pytest --cov=ledger --cov-report=term-missing
-
-# Or one shot
-bash scripts/verify.sh
-```
-
-## Architecture
-
-```
-Daily snapshot job ──force tools/list──▶ SnapshotStore (JSONL)
-        │                                      │
-        │                         ┌────────────┴────────────┐
-        │                         ▼                         ▼
-        │                  Structural diff           Embed → Qdrant
-        │                  (hard/soft/safe)          (per-tool history)
-        │                         │                         │
-        └─────────────────────────┴────────────┬────────────┘
-                                               ▼
-                                        DriftReport → route
-                                   (page / digest / log_only)
-```
-
-## Documentation
-
-- **Setup (start here):** [`docs/SETUP.md`](docs/SETUP.md)
-- Design article (source material): [`docs/article.md`](docs/article.md)
-- Examples: [`examples/README.md`](examples/README.md)
-- MCP caching (2026-07-28): [specification changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
-- OpenAI Agents SDK: [docs](https://openai.github.io/openai-agents-python/) · [Models](https://openai.github.io/openai-agents-python/models/) · [MCP](https://openai.github.io/openai-agents-python/mcp/)
-- Qdrant Query API: [Search docs](https://qdrant.tech/documentation/search/search/)
+| Component | Purpose |
+|---|---|
+| [Qdrant](https://qdrant.tech) `>=1.18.0` | Description embedding history |
+| [Agno](https://github.com/agno-agi/agno) `>=2.8.6` | Triage agent |
+| [mem0](https://mem0.ai) `>=3.0.0` | Cross-run drift memory |
+| [LangGraph](https://langchain-ai.github.io/langgraph/) `>=1.2.10` | detect→route pipeline |
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
-
----
-
-<div align="center"><sub>Part of the <a href="https://aihive.hashnode.dev">AIHive</a> series — <a href="https://aihive.hashnode.dev/ledger-a-consumer-side-contract-guard-for-mcp-tool-schema-drift">read the design article</a></sub></div>
+MIT — see [LICENSE](LICENSE).
