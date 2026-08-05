@@ -28,3 +28,4 @@ tool_snapshots.jsonl
 # Env
 .env
 .env.*
+!.env.example

@@ -1,6 +1,6 @@
 # Ledger: A Consumer-Side Contract Guard for MCP Tool-Schema Drift
 
-> **Implementation:** This article is the design source for the `ledger-mcp` package in this repository. See the project [README](../README.md) for install, API, and end-to-end demos (OpenAI Agents SDK + Qdrant).
+> **Implementation:** This article is the design source for the `ledger-mcp` package in this repository. See [SETUP](SETUP.md) for install and environment, the project [README](../README.md) for API overview, and [`examples/`](../examples/README.md) for end-to-end demos (OpenAI Agents SDK + Qdrant).
 
 The **Model Context Protocol**'s [2026-07-28 specification revision](https://modelcontextprotocol.io/specification/2026-07-28/changelog) added caching hints — `ttlMs` and `cacheScope` — to `tools/list` results, letting a client hold onto a server's declared tool set instead of re-fetching it every session. For a server with a large, stable tool surface, that's a genuine efficiency win: fewer round trips, better prompt-cache hit rates, less redundant traffic on a stateless transport. It is also, if you consume MCP servers you don't control, a change that quietly widens an existing blind spot.
 

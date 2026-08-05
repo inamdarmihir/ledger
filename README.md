@@ -18,6 +18,8 @@ Ledger watches Model Context Protocol servers you *consume but do not control*. 
 
 This repository is an end-to-end implementation of the design in [`docs/article.md`](docs/article.md).
 
+**New here?** Follow the step-by-step guide: [`docs/SETUP.md`](docs/SETUP.md) (install, `.env`, Agents SDK wiring, CLI).
+
 ---
 
 ## Why it exists
@@ -35,15 +37,20 @@ Ledger closes that blind spot from the consumer side:
 
 ```
 ledger/
-├── snapshot.py      # ToolSnapshot, SnapshotStore, snapshot_all_servers()
-├── diff.py          # diff_schemas(), StructuralChange, worst_severity()
-├── semantic.py      # ToolDefinitionHistory (Qdrant-backed drift check)
-├── report.py        # DriftReport, run_contract_guard()
-├── routing.py       # route_report(), format_for_digest()
-├── priority.py      # recommend_cadence()
-├── embeddings.py    # OpenAI text-embedding-3-small helper
-└── protocols.py     # MCPClientLike protocol (Ledger wraps your client)
+├── snapshot.py        # ToolSnapshot, SnapshotStore, snapshot_all_servers()
+├── diff.py            # diff_schemas(), StructuralChange, worst_severity()
+├── semantic.py        # ToolDefinitionHistory (Qdrant-backed drift check)
+├── report.py          # DriftReport, run_contract_guard()
+├── routing.py         # route_report(), format_for_digest()
+├── priority.py        # recommend_cadence()
+├── embeddings.py      # OpenAI text-embedding-3-small helper
+├── protocols.py       # MCPClientLike protocol (Ledger wraps your client)
+├── agents_adapter.py  # OpenAI Agents SDK MCP wrap + gpt-5.6-sol triage Agent
+└── cli.py             # ledger-mcp console entrypoint
 ```
+
+Every module carries article-aligned docstrings so the public API is readable
+without leaving your editor. Examples live under [`examples/`](examples/README.md).
 
 ## Verified models & stack
 
@@ -59,15 +66,22 @@ Set `OPENAI_API_KEY` to exercise live embeddings / the Agents SDK demo. All unit
 ## Install
 
 ```bash
+python3 -m venv .venv && source .venv/bin/activate
+
 # Library only (structural + Qdrant semantic layers)
 pip install -e .
 
-# With OpenAI Agents SDK + embeddings
+# With OpenAI Agents SDK + embeddings (recommended for agent demos)
 pip install -e ".[openai]"
 
 # Dev: tests, ruff, mypy
 pip install -e ".[dev]"
+
+# Optional secrets for live demos
+cp .env.example .env   # then set OPENAI_API_KEY
 ```
+
+Full walkthrough (Agents SDK MCP caching, triage agent, Qdrant): [`docs/SETUP.md`](docs/SETUP.md).
 
 ## Quick start
 
@@ -105,6 +119,24 @@ for report in reports:
 ```
 
 Ledger does **not** ship an MCP client. It wraps whatever client your agent framework already maintains and always calls `list_tools(force_refresh=True)` so monitoring is independent of `ttlMs`.
+
+### OpenAI Agents SDK
+
+```python
+from agents.mcp import MCPServerStreamableHttp
+from agents import Runner
+from ledger.agents_adapter import wrap_agents_mcp_server, build_triage_agent
+
+# Live agent traffic may cache tools/list; Ledger busts that cache on its cadence.
+async with MCPServerStreamableHttp(
+    name="crm", params={"url": "http://localhost:8000/mcp"}, cache_tools_list=True
+) as server:
+    clients = {"crm": wrap_agents_mcp_server(server)}
+    snapshots = snapshot_all_servers(clients, store, snapshot_date=today)
+
+agent = build_triage_agent()  # model="gpt-5.6-sol" + explicit ModelSettings
+result = await Runner.run(agent, f"Triage this Ledger digest:\n\n{digest}")
+```
 
 ### CLI
 
@@ -184,9 +216,11 @@ Daily snapshot job ──force tools/list──▶ SnapshotStore (JSONL)
 
 ## Documentation
 
+- **Setup (start here):** [`docs/SETUP.md`](docs/SETUP.md)
 - Design article (source material): [`docs/article.md`](docs/article.md)
+- Examples: [`examples/README.md`](examples/README.md)
 - MCP caching (2026-07-28): [specification changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
-- OpenAI Agents SDK models: [Models guide](https://openai.github.io/openai-agents-python/models/)
+- OpenAI Agents SDK: [docs](https://openai.github.io/openai-agents-python/) · [Models](https://openai.github.io/openai-agents-python/models/) · [MCP](https://openai.github.io/openai-agents-python/mcp/)
 - Qdrant Query API: [Search docs](https://qdrant.tech/documentation/search/search/)
 
 ## License

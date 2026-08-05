@@ -1,8 +1,23 @@
 #!/usr/bin/env python3
-"""Worked example from the article: search_customers quietly changes its manners.
+"""Worked example from the article: ``search_customers`` quietly changes its manners.
+
+Scenario
+--------
+A shared internal MCP server exposes ``search_customers(query, limit=20)``.
+In one release:
+
+* ``limit`` default drops from ``20`` → ``5`` (structural ``default_changed`` / soft break)
+* Description warns about rate limits (semantic drift; schema shape unchanged)
+
+Ledger reports both signals independently and routes to ``daily_digest``.
 
 Runs entirely offline with a deterministic hash embedder + Qdrant in-memory mode.
 No API keys required.
+
+::
+
+    pip install -e .
+    python examples/worked_example.py
 """
 
 from __future__ import annotations
@@ -38,6 +53,7 @@ def hash_embed(text: str, dims: int = 64) -> list[float]:
 
 
 def main() -> None:
+    """Run the two-day worked example and print structural + semantic findings."""
     yesterday_desc = "Search customer records by name or account ID."
     today_desc = (
         "Search customer records by name or account ID. Use sparingly — "
